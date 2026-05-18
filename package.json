@@ -1,0 +1,33 @@
+{
+  "name": "scribe",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Scribe text/image inputs onto a PDF form via an LLM agent that calls field-setting tools.",
+  "scripts": {
+    "scribe": "tsx src/cli.ts",
+    "make-fixture": "tsx src/make-fixture.ts",
+    "proof:pdf": "tsx src/proofs/pdf-fields.ts",
+    "proof:agent": "tsx src/proofs/agent-tools.ts",
+    "proof:e2e": "tsx src/proofs/end-to-end.ts",
+    "proof:image": "tsx src/proofs/image-only.ts",
+    "ui": "npx --yes serve . -p 5173",
+    "format": "biome format --write src",
+    "lint": "biome check src",
+    "typecheck": "tsc --noEmit",
+    "decisions:html": "tsx src/md-to-html.ts engineering-decisions.md engineering-decisions.html"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.0",
+    "dotenv": "^16.4.5",
+    "marked": "^14.1.3",
+    "openai": "^4.77.0",
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0"
+  }
+}

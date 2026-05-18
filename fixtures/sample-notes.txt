@@ -1,0 +1,5 @@
+Applicant intake notes:
+Name on record: Jane A. Doe
+DOB: 1990-04-12, citizen of the United States.
+Lives in Memphis, TN. Reach her at jane.doe@example.com.
+Purpose of the application is Business.
