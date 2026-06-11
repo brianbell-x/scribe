@@ -9,6 +9,7 @@
     "make-fixture": "tsx src/make-fixture.ts",
     "proof:pdf": "tsx src/proofs/pdf-fields.ts",
     "proof:agent": "tsx src/proofs/agent-tools.ts",
+    "proof:uncertain": "tsx src/proofs/uncertain-tool.ts",
     "proof:e2e": "tsx src/proofs/end-to-end.ts",
     "proof:image": "tsx src/proofs/image-only.ts",
     "ui": "npx --yes serve . -p 5173",

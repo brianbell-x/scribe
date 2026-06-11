@@ -64,8 +64,8 @@ function mimeFor(path: string): string {
 // ─── Tool schemas & system prompt ───────────────────────────────────────────────────────────
 
 // We define the schemas inline so the JSON the model receives matches exactly what the loop
-// dispatches on below. Three tools total.
-const TOOLS = [
+// dispatches on below. Four tools total.
+export const TOOLS = [
   {
     type: "function" as const,
     function: {
@@ -95,6 +95,24 @@ const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "flag_uncertain",
+      description:
+        "Mark one form field for human review without changing the PDF. Use after set_field for best guesses, or for fields you could not fill.",
+      parameters: {
+        type: "object",
+        properties: {
+          field: { type: "string", description: "Exact field name from list_fields." },
+          reason: { type: "string", description: "Brief reason this field needs review." },
+          confidence: { type: "string", enum: ["low", "medium"] },
+        },
+        required: ["field", "reason", "confidence"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "finish",
       description:
         "End the run. Pass a short human-readable summary of what was filled and any fields you left blank (and why).",
@@ -116,7 +134,10 @@ the list_fields tool.
 Rules:
 - Start by calling list_fields exactly once to learn the form.
 - For every relevant field you can support, call set_field with the correct value.
-- Only set fields you can support from the source inputs. Leave the rest blank.
+- If evidence is uncertain but a plausible value exists, set the best-guess value with
+  set_field first, then call flag_uncertain with field, reason, and low/medium confidence.
+- Do not leave fields empty out of caution. Leave a field blank only when no plausible value
+  exists; if that field matters, call flag_uncertain with why it could not be filled.
 - For dropdowns and radios, pick from the listed options verbatim. Do not invent options.
 - For dates, use the format implied by the field label (YYYY-MM-DD if unclear).
 - When done, call the finish tool with a one-paragraph summary of what was filled and what
@@ -132,6 +153,13 @@ export interface ToolCallRecord {
   name: string;
   arguments: Record<string, unknown>;
   result: string;
+}
+
+export type UncertaintyConfidence = "low" | "medium";
+export interface UncertainFlag {
+  field: string;
+  reason: string;
+  confidence: UncertaintyConfidence;
 }
 
 export interface ScribeRunResult {
@@ -236,6 +264,18 @@ function executeToolCall(
   if (name === "set_field") {
     const fieldName = typeof parsedArgs.name === "string" ? parsedArgs.name : "";
     const result = setField(form, fieldName, parsedArgs.value);
+    return { record: { id: call.id, name, arguments: parsedArgs, result }, finished: false };
+  }
+  if (name === "flag_uncertain") {
+    const field = typeof parsedArgs.field === "string" ? parsedArgs.field : "";
+    const reason = typeof parsedArgs.reason === "string" ? parsedArgs.reason : "";
+    const confidence = parsedArgs.confidence;
+    let result = "";
+    if (!form.fields.has(field)) result = `error: no field named "${field}"`;
+    else if (!reason) result = "error: flag_uncertain requires a reason";
+    else if (confidence !== "low" && confidence !== "medium") {
+      result = 'error: confidence must be "low" or "medium"';
+    } else result = `ok: flagged ${field} uncertain (${confidence})`;
     return { record: { id: call.id, name, arguments: parsedArgs, result }, finished: false };
   }
   if (name === "finish") {

@@ -2,7 +2,7 @@
 //   npm run scribe -- --form fixtures/sample-form.pdf --text "..." --image photo.png --out out/filled.pdf
 import "dotenv/config";
 import { resolve } from "node:path";
-import { scribe } from "./scribe.ts";
+import { renderCliSummary, scribe } from "./scribe.ts";
 
 interface Args {
   form?: string;
@@ -71,12 +71,7 @@ async function main(): Promise<void> {
     model: args.model,
   });
 
-  console.log(`Filled PDF: ${result.outPath}`);
-  console.log(`Transcript: ${result.transcriptPath}`);
-  console.log(`Model:      ${result.modelUsed}`);
-  console.log(`Tool calls: ${result.toolCallCount}`);
-  console.log("");
-  console.log(`Summary: ${result.summary}`);
+  console.log(renderCliSummary(result));
 }
 
 main().catch((err) => {
