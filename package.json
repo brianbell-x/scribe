@@ -8,6 +8,7 @@
     "scribe": "tsx src/cli.ts",
     "make-fixture": "tsx src/make-fixture.ts",
     "proof:pdf": "tsx src/proofs/pdf-fields.ts",
+    "proof:govforms": "tsx src/proofs/govforms.ts",
     "proof:agent": "tsx src/proofs/agent-tools.ts",
     "proof:uncertain": "tsx src/proofs/uncertain-tool.ts",
     "proof:e2e": "tsx src/proofs/end-to-end.ts",

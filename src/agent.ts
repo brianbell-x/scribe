@@ -71,7 +71,7 @@ export const TOOLS = [
     function: {
       name: "list_fields",
       description:
-        "List every fillable field on the target PDF form. Returns name, kind (text/checkbox/radio/dropdown/optionlist), available options (for choice fields), and currentValue. Call this once at the start to plan.",
+        "List every fillable field on the target PDF form. Returns name, kind (text/checkbox/radio/dropdown/optionlist), maxLength for constrained text fields, available options for choice fields, and currentValue. Call this once at the start to plan.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
@@ -80,7 +80,7 @@ export const TOOLS = [
     function: {
       name: "set_field",
       description:
-        "Write a value into one field on the PDF. For text fields, value is a string; for checkboxes, true/false; for dropdown/radio, exactly one of the listed options; for optionlist, an array of options.",
+        "Write a value into one field on the PDF. Respect list_fields constraints: text maxLength, checkbox true/false, dropdown/radio exact listed option, optionlist array of listed options.",
       parameters: {
         type: "object",
         properties: {
@@ -138,7 +138,7 @@ Rules:
   set_field first, then call flag_uncertain with field, reason, and low/medium confidence.
 - Do not leave fields empty out of caution. Leave a field blank only when no plausible value
   exists; if that field matters, call flag_uncertain with why it could not be filled.
-- For dropdowns and radios, pick from the listed options verbatim. Do not invent options.
+- Before calling set_field, respect list_fields constraints: text maxLength and listed options.
 - For dates, use the format implied by the field label (YYYY-MM-DD if unclear).
 - When done, call the finish tool with a one-paragraph summary of what was filled and what
   was deliberately left blank (and why).

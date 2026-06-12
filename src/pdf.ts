@@ -18,6 +18,7 @@ export interface FieldInfo {
   name: string;
   kind: FieldKind;
   options?: string[]; // present for radio / dropdown / optionlist
+  maxLength?: number; // present for constrained text fields
   currentValue?: string | boolean | string[];
 }
 
@@ -30,15 +31,44 @@ export interface FormHandle {
 
 export async function loadForm(pdfPath: string): Promise<FormHandle> {
   const bytes = await readFile(pdfPath);
-  const pdf = await PDFDocument.load(bytes);
-  const form = pdf.getForm();
+  const warn = console.warn;
+  console.warn = (...args) => {
+    const msg = String(args[0] ?? "");
+    if (
+      msg.startsWith("Trying to parse invalid object") ||
+      msg.startsWith("Invalid object ref") ||
+      msg.startsWith("Removing XFA form data")
+    ) {
+      return;
+    }
+    warn(...args);
+  };
+  const { pdf, rawFields } = await PDFDocument.load(bytes, {
+    ignoreEncryption: true,
+    throwOnInvalidObject: false,
+  })
+    .then((pdf) => ({ pdf, rawFields: pdf.getForm().getFields() }))
+    .finally(() => {
+      console.warn = warn;
+    });
+  if (rawFields.length === 0) {
+    throw new Error(
+      "no AcroForm fields - this is probably an XFA or flat form; scribe cannot fill it yet",
+    );
+  }
   const fields = new Map<string, FieldInfo>();
 
   // Walk every field, normalize to FieldInfo, store both for listing and for later mutation.
-  for (const f of form.getFields()) {
+  for (const f of rawFields) {
     const name = f.getName();
     if (f instanceof PDFTextField) {
-      fields.set(name, { name, kind: "text", currentValue: f.getText() ?? "" });
+      const maxLength = f.getMaxLength();
+      fields.set(name, {
+        name,
+        kind: "text",
+        ...(maxLength === undefined ? {} : { maxLength }),
+        currentValue: f.getText() ?? "",
+      });
     } else if (f instanceof PDFCheckBox) {
       fields.set(name, { name, kind: "checkbox", currentValue: f.isChecked() });
     } else if (f instanceof PDFRadioGroup) {
@@ -83,56 +113,63 @@ export function setField(h: FormHandle, name: string, value: unknown): string {
   if (!info) return `error: no field named "${name}"`;
   const form = h.pdf.getForm();
 
-  switch (info.kind) {
-    case "text": {
-      if (typeof value !== "string") return `error: field "${name}" expects a string`;
-      form.getTextField(name).setText(value);
-      info.currentValue = value;
-      return `ok: set ${name} = ${JSON.stringify(value)}`;
-    }
-    case "checkbox": {
-      const bool = coerceBool(value);
-      if (bool === null) return `error: field "${name}" expects true/false`;
-      const cb = form.getCheckBox(name);
-      if (bool) cb.check();
-      else cb.uncheck();
-      info.currentValue = bool;
-      return `ok: set ${name} = ${bool}`;
-    }
-    case "radio": {
-      if (typeof value !== "string") return `error: field "${name}" expects a string option`;
-      if (info.options && !info.options.includes(value)) {
-        return `error: ${name} options are ${JSON.stringify(info.options)}`;
+  try {
+    switch (info.kind) {
+      case "text": {
+        if (typeof value !== "string") return `error: field "${name}" expects a string`;
+        if (info.maxLength !== undefined && value.length > info.maxLength) {
+          return `error: value exceeds maxLength=${info.maxLength} for this field (got ${value.length} chars). Check the field constraints and retry with a valid value.`;
+        }
+        form.getTextField(name).setText(value);
+        info.currentValue = value;
+        return `ok: set ${name} = ${JSON.stringify(value)}`;
       }
-      form.getRadioGroup(name).select(value);
-      info.currentValue = value;
-      return `ok: set ${name} = ${JSON.stringify(value)}`;
-    }
-    case "dropdown": {
-      if (typeof value !== "string") return `error: field "${name}" expects a string option`;
-      if (info.options && !info.options.includes(value)) {
-        return `error: ${name} options are ${JSON.stringify(info.options)}`;
+      case "checkbox": {
+        const bool = coerceBool(value);
+        if (bool === null) return `error: field "${name}" expects true/false`;
+        const cb = form.getCheckBox(name);
+        if (bool) cb.check();
+        else cb.uncheck();
+        info.currentValue = bool;
+        return `ok: set ${name} = ${bool}`;
       }
-      form.getDropdown(name).select(value);
-      info.currentValue = value;
-      return `ok: set ${name} = ${JSON.stringify(value)}`;
-    }
-    case "optionlist": {
-      const arr = Array.isArray(value)
-        ? value.map(String)
-        : typeof value === "string"
-          ? [value]
-          : null;
-      if (!arr) return `error: field "${name}" expects an array of option strings`;
-      if (info.options && arr.some((v) => !info.options?.includes(v))) {
-        return `error: ${name} options are ${JSON.stringify(info.options)}`;
+      case "radio": {
+        if (typeof value !== "string") return `error: field "${name}" expects a string option`;
+        if (info.options && !info.options.includes(value)) {
+          return `error: ${name} options are ${JSON.stringify(info.options)}`;
+        }
+        form.getRadioGroup(name).select(value);
+        info.currentValue = value;
+        return `ok: set ${name} = ${JSON.stringify(value)}`;
       }
-      form.getOptionList(name).select(arr);
-      info.currentValue = arr;
-      return `ok: set ${name} = ${JSON.stringify(arr)}`;
+      case "dropdown": {
+        if (typeof value !== "string") return `error: field "${name}" expects a string option`;
+        if (info.options && !info.options.includes(value)) {
+          return `error: ${name} options are ${JSON.stringify(info.options)}`;
+        }
+        form.getDropdown(name).select(value);
+        info.currentValue = value;
+        return `ok: set ${name} = ${JSON.stringify(value)}`;
+      }
+      case "optionlist": {
+        const arr = Array.isArray(value)
+          ? value.map(String)
+          : typeof value === "string"
+            ? [value]
+            : null;
+        if (!arr) return `error: field "${name}" expects an array of option strings`;
+        if (info.options && arr.some((v) => !info.options?.includes(v))) {
+          return `error: ${name} options are ${JSON.stringify(info.options)}`;
+        }
+        form.getOptionList(name).select(arr);
+        info.currentValue = arr;
+        return `ok: set ${name} = ${JSON.stringify(arr)}`;
+      }
+      default:
+        return `error: field "${name}" has unsupported kind`;
     }
-    default:
-      return `error: field "${name}" has unsupported kind`;
+  } catch (err) {
+    return `error: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
 
