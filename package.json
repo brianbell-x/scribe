@@ -14,6 +14,8 @@
     "proof:e2e": "tsx src/proofs/end-to-end.ts",
     "proof:image": "tsx src/proofs/image-only.ts",
     "proof:flatfill-draw": "tsx proofs-flatfill/draw.ts --check",
+    "proof:flatfill-mode": "tsx proofs-flatfill/mode.ts",
+    "proof:server": "tsx src/proofs/server.ts",
     "serve": "tsx src/server.ts",
     "format": "biome format --write src proofs-flatfill",
     "lint": "biome check src proofs-flatfill",

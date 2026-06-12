@@ -3,13 +3,11 @@
 import "dotenv/config";
 import { buildUserContent, runAgent } from "../agent.ts";
 import { loadForm } from "../pdf.ts";
+import { fixtureComplete } from "./mock-agent.ts";
 
 async function main(): Promise<void> {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    console.error("OPENROUTER_API_KEY missing");
-    process.exit(1);
-  }
+  const offline = process.env.SCRIBE_OFFLINE === "1" || !apiKey;
   const form = await loadForm("fixtures/sample-form.pdf");
   const userContent = await buildUserContent({
     texts: [
@@ -18,10 +16,11 @@ async function main(): Promise<void> {
     images: [],
   });
   const result = await runAgent({
-    apiKey,
-    model: process.env.SCRIBE_MODEL ?? "anthropic/claude-sonnet-4.5",
+    apiKey: offline ? "offline" : (apiKey ?? "offline"),
+    model: offline ? "mock-offline" : (process.env.SCRIBE_MODEL ?? "anthropic/claude-sonnet-4.5"),
     userContent,
     form,
+    complete: offline ? fixtureComplete() : undefined,
   });
   console.log(`Model: ${result.modelUsed}`);
   console.log(`Tool calls: ${result.toolCalls.length}`);

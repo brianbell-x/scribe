@@ -1,13 +1,18 @@
 # Flat-fill / overlay proof findings
 
 ## Status
-- Phase proof only. Not wired into product code.
+- Integrated into product code after the live proof verdict.
+- AcroForm mode remains the default. Flat/XFA overlay mode activates only when
+  `pythonPath`, CLI `--python`, or server `SCRIBE_PYTHON` is configured.
 - Deterministic overlay core writes text and checkbox marks with percentage coordinates.
-- Live AI placement runner requires pre-rendered page PNGs and a pdf-lib drawable PDF.
-- Raster fallback command: `pdftoppm -png -f 1 -l 1 -r 200 proofs-i130/i-130.pdf out/i130-pages/page`.
+- Product flat mode normalizes via `pypdf` when pdf-lib cannot page-load the raw PDF,
+  rasterizes via `pypdfium2`, and auto re-renders changed pages for model correction.
 
 ## Offline proof
 - `npm run proof:flatfill-draw` verifies save/reload integrity and content-stream growth on a page-loadable government PDF.
+- `npm run proof:flatfill-mode` uses a mocked model and controlled Python path to assert
+  flat tools, automatic render feedback, two-correction-round bounding, transcript shape,
+  and placement fields such as `page1@22,27: FIRST`.
 - Direct drawing on `proofs-i130/i-130.pdf` is currently blocked: pdf-lib cannot resolve the encrypted object-stream page tree (`Expected instance of PDFDict, but got instance of undefined`).
 
 ## Live-run questions
@@ -23,3 +28,6 @@ Chain proven end to end: pypdf normalization (raw I-130 unparseable by pdf-lib A
 Placement accuracy on I-130 page 1 (3 placements): 1 exact (text inside the intended comb field), 1 near-miss (~1-2% high, clips field border), 1 zone-miss (checkbox X landed outside the target box, ~3-4% off both axes).
 
 VERDICT: flat-fill is viable; single-pass placement is not production-accurate. Production design must include a verify-iterate loop (draw -> re-render via pdfium -> model compares against intent -> adjusted placements), mirroring the refinement-loop finding from web-design-lead-gen. Integration into the product should bundle: normalization step, pdfium rasterizer, placement tool with iteration, and the existing flag_uncertain pattern for placements the model cannot confidently locate.
+
+## Product flat-mode live run (2026-06-12, I-130 via CLI)
+52 tool calls, completed. The verify-iterate loop worked as designed: the model detected its own misalignments from re-renders and flagged them (7 flags; missing source data correctly flagged, not invented). Placement quality on comb-field-dense pages remains below hands-off filling: name fields landed left of their boxes, one address block failed to land. POSITION: flat mode is an assisted-overlay capability requiring operator review (the Review tab surfaces every flag); hands-off accuracy needs anchor-based placement (detect field rectangles, snap proposals) or more iteration rounds - documented future work, not demo-blocking per AGENTS.md accepted-issues rule.

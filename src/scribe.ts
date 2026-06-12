@@ -3,13 +3,22 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 import {
+  type ChatComplete,
   type SourceInputs,
   type ToolCallRecord,
   type UncertainFlag,
   buildUserContent,
   runAgent,
 } from "./agent.ts";
-import { type FieldInfo, listFields, loadForm, saveForm } from "./pdf.ts";
+import { runFlatAgent } from "./flat.ts";
+import {
+  type FieldInfo,
+  type FormHandle,
+  isNoAcroFormError,
+  listFields,
+  loadForm,
+  saveForm,
+} from "./pdf.ts";
 
 export type { SourceInputs } from "./agent.ts";
 
@@ -19,6 +28,8 @@ export interface ScribeOptions {
   inputs: SourceInputs;
   apiKey: string;
   model?: string;
+  pythonPath?: string;
+  complete?: ChatComplete;
   onEvent?: (event: ScribeEvent) => void;
 }
 
@@ -39,7 +50,24 @@ export async function scribe(opts: ScribeOptions): Promise<ScribeResult> {
   const model = opts.model ?? process.env.SCRIBE_MODEL ?? DEFAULT_MODEL;
 
   // Parse the form first so we can fail fast if it's not an AcroForm.
-  const form = await loadForm(opts.formPath);
+  let form: FormHandle;
+  try {
+    form = await loadForm(opts.formPath);
+  } catch (err) {
+    if (!opts.pythonPath || !isNoAcroFormError(err)) throw err;
+    const userContent = await buildUserContent(opts.inputs);
+    const run = await runFlatAgent({
+      apiKey: opts.apiKey,
+      model,
+      userContent,
+      formPath: opts.formPath,
+      outPath: opts.outPath,
+      pythonPath: opts.pythonPath,
+      complete: opts.complete,
+      onToolCall: (record, fields) => opts.onEvent?.({ type: "tool_call", record, fields }),
+    });
+    return writeResult(opts, run);
+  }
   if (form.fields.size === 0) {
     throw new Error(
       `No AcroForm fields found in ${opts.formPath}. Scribe currently supports AcroForm PDFs only.`,
@@ -54,11 +82,19 @@ export async function scribe(opts: ScribeOptions): Promise<ScribeResult> {
     model,
     userContent,
     form,
+    complete: opts.complete,
     onToolCall: (record) => opts.onEvent?.({ type: "tool_call", record, fields: listFields(form) }),
   });
 
   // Persist the filled PDF, then write the tool-call transcript next to it.
   await saveForm(form, opts.outPath);
+  return writeResult(opts, run);
+}
+
+async function writeResult(
+  opts: Pick<ScribeOptions, "formPath" | "outPath">,
+  run: { summary: string; toolCalls: ToolCallRecord[]; modelUsed: string },
+): Promise<ScribeResult> {
   const uncertainFlags = collectUncertainFlags(run.toolCalls);
   const transcriptPath = resolve(
     dirname(opts.outPath),

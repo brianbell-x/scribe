@@ -6,7 +6,6 @@
 // boundary, so they live together rather than in a 50-line inputs.ts sibling.
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import OpenAI from "openai";
 import type {
   ChatCompletionContentPart,
   ChatCompletionMessageParam,
@@ -168,6 +167,8 @@ export interface ScribeRunResult {
   modelUsed: string;
 }
 
+export type ChatComplete = (req: any) => Promise<any>;
+
 // Bound the loop. In practice we settle in 2–5 round-trips on the sample form; the ceiling
 // exists so a runaway model never spins forever.
 const MAX_TURNS = 12;
@@ -177,9 +178,18 @@ export async function runAgent(args: {
   model: string;
   userContent: ContentPart[];
   form: FormHandle;
+  complete?: ChatComplete;
   onToolCall?: (record: ToolCallRecord) => void;
 }): Promise<ScribeRunResult> {
-  const client = new OpenAI({ apiKey: args.apiKey, baseURL: "https://openrouter.ai/api/v1" });
+  const complete =
+    args.complete ??
+    (async (req: any) => {
+      const { default: OpenAI } = await import("openai");
+      return new OpenAI({
+        apiKey: args.apiKey,
+        baseURL: "https://openrouter.ai/api/v1",
+      }).chat.completions.create(req);
+    });
 
   const messages: ChatCompletionMessageParam[] = [
     { role: "system", content: SYSTEM_PROMPT },
@@ -190,7 +200,7 @@ export async function runAgent(args: {
   let stopReason: "finish" | "no-tool-calls" | "max-turns" = "max-turns";
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const resp = await client.chat.completions.create({
+    const resp = await complete({
       model: args.model,
       messages,
       tools: TOOLS,

@@ -101,6 +101,10 @@ export async function loadForm(pdfPath: string): Promise<FormHandle> {
   return { pdf, fields };
 }
 
+export function isNoAcroFormError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("no AcroForm fields");
+}
+
 // Pure read for the `list_fields` tool — small payload because the model only needs names+types.
 export function listFields(h: FormHandle): FieldInfo[] {
   return [...h.fields.values()];

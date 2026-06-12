@@ -10,6 +10,7 @@ interface Args {
   texts: string[];
   images: string[];
   model?: string;
+  python?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -33,6 +34,9 @@ function parseArgs(argv: string[]): Args {
     } else if (flag === "--model") {
       args.model = value;
       i++;
+    } else if (flag === "--python") {
+      args.python = value;
+      i++;
     }
   }
   return args;
@@ -42,11 +46,11 @@ function usage(): never {
   console.error(
     [
       "Usage:",
-      '  npm run scribe -- --form <pdf> --out <pdf> [--text "..."]... [--image <path>]... [--model <slug>]',
+      '  npm run scribe -- --form <pdf> --out <pdf> [--text "..."]... [--image <path>]... [--model <slug>] [--python <path>]',
       "",
       "Notes:",
       "  --text and --image may be repeated. At least one of them is required.",
-      "  The form PDF must have AcroForm fields (use `npm run make-fixture` for a sample).",
+      "  Flat/XFA PDFs require --python or SCRIBE_PYTHON with pypdf + pypdfium2 installed.",
     ].join("\n"),
   );
   process.exit(2);
@@ -69,6 +73,7 @@ async function main(): Promise<void> {
     inputs: { texts: args.texts, images: args.images },
     apiKey,
     model: args.model,
+    pythonPath: args.python ?? process.env.SCRIBE_PYTHON,
   });
 
   console.log(renderCliSummary(result));

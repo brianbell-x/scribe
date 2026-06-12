@@ -1,8 +1,6 @@
-// ORCHESTRATOR: this is the live proof and makes an OpenRouter call.
-// 1. Render I-130 page 1 to PNG(s), e.g. out/i130-pages/page-1.png.
-// 2. Set OPENROUTER_API_KEY and optionally SCRIBE_MODEL.
-// 3. Run: tsx proofs-flatfill/run-i130-overlay.ts --pages out/i130-pages --pdf <drawable.pdf>
-// The checked-in I-130 currently needs external normalization before pdf-lib can draw on it.
+// ORCHESTRATOR LEGACY PROOF: product flat mode now lives behind:
+//   npm run scribe -- --form proofs-i130/i-130.pdf --text "<intake notes>" --out out/i130-flat.pdf --python <python>
+// This script remains as the original live probe for pre-rendered page PNGs + drawable PDF.
 import "dotenv/config";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";

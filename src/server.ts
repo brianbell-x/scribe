@@ -18,8 +18,16 @@ import { basename, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ToolCallRecord, UncertainFlag } from "./agent.ts";
 import {
+  type FlatPlacement,
+  drawFlatPdf,
+  flatFieldInfo,
+  flatFieldName,
+  prepareFlatPdf,
+} from "./flat.ts";
+import {
   type FieldInfo,
   type FormHandle,
+  isNoAcroFormError,
   listFields,
   loadForm,
   saveForm,
@@ -32,9 +40,12 @@ type ApiSource = { name?: string; type?: string; data?: string };
 type RunEvent = { event: string; data: unknown };
 type Run = {
   id: string;
+  mode: "acroform" | "flat";
   dir: string;
   formPath: string;
   outPath: string;
+  pythonPath?: string;
+  flatPlacements?: FlatPlacement[];
   transcriptPath?: string;
   status: Status;
   fields: FieldInfo[];
@@ -78,21 +89,36 @@ async function createRun(body: any, outRoot: string): Promise<string> {
   const dir = resolve(outRoot, id);
   const formPath = resolve(dir, "form.pdf");
   const outPath = resolve(dir, "filled.pdf");
+  const pdfBytes = Buffer.from(body.pdf, "base64");
+  const pythonPath = process.env.SCRIBE_PYTHON;
   await mkdir(dir, { recursive: true });
-  await writeFile(formPath, Buffer.from(body.pdf, "base64"));
-  const form = await loadForm(formPath);
-  if (form.fields.size === 0) throw new Error("No AcroForm fields found in uploaded PDF.");
-  await saveForm(form, outPath);
+  await writeFile(formPath, pdfBytes);
+  let mode: Run["mode"] = "acroform";
+  let fields: FieldInfo[] = [];
+  let required = new Set<string>();
+  try {
+    const form = await loadForm(formPath);
+    if (form.fields.size === 0) throw new Error("No AcroForm fields found in uploaded PDF.");
+    await saveForm(form, outPath);
+    fields = cloneFields(listFields(form));
+    required = requiredNames(form);
+  } catch (err) {
+    if (!pythonPath || !isNoAcroFormError(err)) throw err;
+    mode = "flat";
+    await writeFile(outPath, pdfBytes);
+  }
   const inputs = await writeSources(body.sources, dir);
   const run: Run = {
     id,
+    mode,
     dir,
     formPath,
     outPath,
+    pythonPath,
     status: "running",
-    fields: cloneFields(listFields(form)),
-    values: valuesOf(listFields(form)),
-    required: requiredNames(form),
+    fields,
+    values: valuesOf(fields),
+    required,
     flags: [],
     toolCalls: [],
     events: [],
@@ -114,12 +140,13 @@ async function runScribe(run: Run, inputs: SourceInputs): Promise<void> {
       inputs,
       apiKey,
       model: process.env.SCRIBE_MODEL,
+      pythonPath: run.pythonPath,
       onEvent: (e) => applyScribeEvent(run, e),
     });
     run.status = "done";
     run.summary = result.summary;
     run.transcriptPath = result.transcriptPath;
-    await syncFields(run, run.outPath);
+    if (run.mode === "acroform") await syncFields(run, run.outPath);
     emit(run, "run_done", result);
   } catch (err) {
     run.status = "error";
@@ -133,6 +160,7 @@ function applyScribeEvent(run: Run, e: ScribeEvent): void {
   run.fields = cloneFields(e.fields);
   run.values = valuesOf(run.fields);
   run.flags = collectUncertainFlags(run.toolCalls);
+  if (run.mode === "flat") run.flatPlacements = flatPlacements(run.toolCalls);
   emit(run, "tool_call", e.record);
 }
 
@@ -151,6 +179,7 @@ async function handleRunRoute(
     if (run.status === "running") return send(res, 409, { error: "run is still running" });
     const body = await readJson(req);
     if (typeof body.field !== "string") return send(res, 400, { error: "field is required" });
+    if (run.mode === "flat") return await correctFlatField(res, run, body.field, body.value);
     const form = await loadForm(run.outPath);
     const result = setField(form, body.field, body.value);
     if (result.startsWith("error:")) return send(res, 400, { error: result });
@@ -161,6 +190,33 @@ async function handleRunRoute(
     return send(res, 200, stateOf(run));
   }
   return send(res, 405, { error: "method not allowed" });
+}
+
+async function correctFlatField(
+  res: ServerResponse,
+  run: Run,
+  field: string,
+  value: unknown,
+): Promise<void> {
+  if (!run.pythonPath) return send(res, 400, { error: "flat correction requires SCRIBE_PYTHON" });
+  const placements = [...(run.flatPlacements ?? flatPlacements(run.toolCalls))];
+  const i = placements.findIndex((p) => flatFieldName(p) === field);
+  if (i < 0) return send(res, 400, { error: `error: no field named "${field}"` });
+  const p = placements[i];
+  if (!p) return send(res, 400, { error: `error: no field named "${field}"` });
+  if ("value" in p) p.value = String(value ?? "");
+  else if (value === false) placements.splice(i, 1);
+  const base = await prepareFlatPdf(run.formPath, run.pythonPath);
+  await drawFlatPdf(base.path, run.outPath, placements);
+  run.flatPlacements = placements;
+  run.fields = [
+    ...placements.map(flatFieldInfo),
+    ...run.fields.filter((f) => f.kind === "unsupported"),
+  ];
+  run.values = valuesOf(run.fields);
+  run.flags = run.flags.filter((f) => f.field !== field);
+  emit(run, "field_corrected", { field, value, result: `ok: set ${field}` });
+  return send(res, 200, stateOf(run));
 }
 
 function openEvents(res: ServerResponse, run: Run): void {
@@ -229,6 +285,33 @@ function valuesOf(fields: FieldInfo[]): Record<string, unknown> {
   return Object.fromEntries(
     fields.map((f) => [f.name, f.currentValue ?? (f.kind === "checkbox" ? false : "")]),
   );
+}
+
+function flatPlacements(calls: ToolCallRecord[]): FlatPlacement[] {
+  const out: FlatPlacement[] = [];
+  for (const c of calls) {
+    if (!c.result.startsWith("ok: placed")) continue;
+    const a = c.arguments;
+    const page = typeof a.page === "number" ? a.page : 0;
+    const xPct = typeof a.xPct === "number" ? a.xPct : 0;
+    const yPct = typeof a.yPct === "number" ? a.yPct : 0;
+    const p =
+      c.name === "place_text" && typeof a.value === "string" && typeof a.size === "number"
+        ? { page, xPct, yPct, size: a.size, value: a.value }
+        : c.name === "place_mark"
+          ? { page, xPct, yPct, mark: true as const }
+          : null;
+    if (!p) continue;
+    const i =
+      "value" in p
+        ? out.findIndex((x) => "value" in x && x.page === p.page && x.value === p.value)
+        : out.filter((x) => "mark" in x && x.page === p.page).length === 1
+          ? out.findIndex((x) => "mark" in x && x.page === p.page)
+          : -1;
+    if (i >= 0) out[i] = p;
+    else out.push(p);
+  }
+  return out;
 }
 
 function cloneFields(fields: FieldInfo[]): FieldInfo[] {
