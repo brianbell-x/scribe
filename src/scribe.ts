@@ -9,7 +9,7 @@ import {
   buildUserContent,
   runAgent,
 } from "./agent.ts";
-import { loadForm, saveForm } from "./pdf.ts";
+import { type FieldInfo, listFields, loadForm, saveForm } from "./pdf.ts";
 
 export type { SourceInputs } from "./agent.ts";
 
@@ -19,7 +19,10 @@ export interface ScribeOptions {
   inputs: SourceInputs;
   apiKey: string;
   model?: string;
+  onEvent?: (event: ScribeEvent) => void;
 }
+
+export type ScribeEvent = { type: "tool_call"; record: ToolCallRecord; fields: FieldInfo[] };
 
 export interface ScribeResult {
   outPath: string;
@@ -46,7 +49,13 @@ export async function scribe(opts: ScribeOptions): Promise<ScribeResult> {
   const userContent = await buildUserContent(opts.inputs);
 
   // Run the agent loop. Each set_field tool call mutates `form` in place; we only write at the end.
-  const run = await runAgent({ apiKey: opts.apiKey, model, userContent, form });
+  const run = await runAgent({
+    apiKey: opts.apiKey,
+    model,
+    userContent,
+    form,
+    onToolCall: (record) => opts.onEvent?.({ type: "tool_call", record, fields: listFields(form) }),
+  });
 
   // Persist the filled PDF, then write the tool-call transcript next to it.
   await saveForm(form, opts.outPath);

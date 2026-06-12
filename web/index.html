@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scribe Operator</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Scribe</h1>
+          <p>Local form operator</p>
+        </div>
+        <nav aria-label="Workspace tabs">
+          <button class="tab is-active" data-tab="new">New run</button>
+          <button class="tab" data-tab="review">Review</button>
+          <button class="tab" data-tab="replay">Replay</button>
+        </nav>
+      </header>
+
+      <section id="new" class="view is-active">
+        <form id="runForm" class="run-form">
+          <label>PDF form <input id="pdf" type="file" accept="application/pdf" required /></label>
+          <label>Sources <input id="sources" type="file" multiple required /></label>
+          <button type="submit">Start run</button>
+        </form>
+        <ol id="events" class="events"></ol>
+      </section>
+
+      <section id="review" class="view">
+        <div id="reviewBody" class="empty">No run selected.</div>
+      </section>
+
+      <section id="replay" class="view">
+        <label class="file-line">Transcript JSON <input id="replayFile" type="file" accept="application/json" /></label>
+        <div id="replayBody" class="empty">No transcript loaded.</div>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

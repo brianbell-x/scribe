@@ -177,6 +177,7 @@ export async function runAgent(args: {
   model: string;
   userContent: ContentPart[];
   form: FormHandle;
+  onToolCall?: (record: ToolCallRecord) => void;
 }): Promise<ScribeRunResult> {
   const client = new OpenAI({ apiKey: args.apiKey, baseURL: "https://openrouter.ai/api/v1" });
 
@@ -215,6 +216,7 @@ export async function runAgent(args: {
         summary = outcome.summary ?? summary;
       }
       toolCalls.push(outcome.record);
+      args.onToolCall?.(outcome.record);
       messages.push({ role: "tool", tool_call_id: call.id, content: outcome.record.result });
     }
 

@@ -12,7 +12,7 @@
     "proof:uncertain": "tsx src/proofs/uncertain-tool.ts",
     "proof:e2e": "tsx src/proofs/end-to-end.ts",
     "proof:image": "tsx src/proofs/image-only.ts",
-    "ui": "npx --yes serve . -p 5173",
+    "serve": "tsx src/server.ts",
     "format": "biome format --write src",
     "lint": "biome check src",
     "typecheck": "tsc --noEmit",
