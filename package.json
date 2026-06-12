@@ -13,9 +13,10 @@
     "proof:uncertain": "tsx src/proofs/uncertain-tool.ts",
     "proof:e2e": "tsx src/proofs/end-to-end.ts",
     "proof:image": "tsx src/proofs/image-only.ts",
+    "proof:flatfill-draw": "tsx proofs-flatfill/draw.ts --check",
     "serve": "tsx src/server.ts",
-    "format": "biome format --write src",
-    "lint": "biome check src",
+    "format": "biome format --write src proofs-flatfill",
+    "lint": "biome check src proofs-flatfill",
     "typecheck": "tsc --noEmit",
     "decisions:html": "tsx src/md-to-html.ts engineering-decisions.md engineering-decisions.html"
   },
