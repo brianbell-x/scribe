@@ -1,0 +1,8 @@
+AP vendor setup / Form W-9.
+Line 1 tax name: Rowan Quinn
+Line 2 business/disregarded entity: Acme Studio LLC
+Federal tax classification: LLC, entered tax code S (not the separate S-corporation box).
+Address: 410 Market St, Suite 9
+City/state/ZIP: Denver, CO 80202
+Requester's name/address field: Northstar Events AP
+No exempt payee or FATCA codes. EIN and vendor account are on the attached vendor card.

@@ -1,43 +1,130 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Scribe Operator</title>
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
-    <main>
-      <header>
-        <div>
-          <h1>Scribe</h1>
-          <p>Local form operator</p>
-        </div>
-        <nav aria-label="Workspace tabs">
-          <button class="tab is-active" data-tab="new">New run</button>
-          <button class="tab" data-tab="review">Review</button>
-          <button class="tab" data-tab="replay">Replay</button>
-        </nav>
-      </header>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scribe</title>
+<style>
+  * { box-sizing: border-box; }
+  body { max-width: 640px; margin: 2rem auto; padding: 0 1rem; font: 15px/1.5 system-ui, sans-serif; color: #1c1c1e; }
+  h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+  .sub { color: #6b6b70; margin-top: 0; }
+  .drop { border: 2px dashed #c7c7cc; border-radius: 10px; padding: 1.25rem; text-align: center; color: #6b6b70; cursor: pointer; margin: .75rem 0; }
+  .drop.over { border-color: #0a84ff; color: #0a84ff; }
+  .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0; }
+  .chip { background: #f0f0f3; border-radius: 999px; padding: .2rem .7rem; font-size: 13px; }
+  .chip button { border: 0; background: none; cursor: pointer; color: #8e8e93; margin-left: .3rem; }
+  textarea { width: 100%; min-height: 90px; padding: .6rem; border: 1px solid #d1d1d6; border-radius: 8px; font: inherit; resize: vertical; }
+  #go { width: 100%; padding: .7rem; border: 0; border-radius: 8px; background: #0a84ff; color: #fff; font-size: 15px; cursor: pointer; margin-top: .75rem; }
+  #go:disabled { background: #c7c7cc; cursor: default; }
+  #status { margin: .75rem 0; color: #6b6b70; }
+  #status.err { color: #d70015; }
+  #result { display: none; border-top: 1px solid #e5e5ea; padding-top: 1rem; margin-top: 1rem; }
+  #result a { display: inline-block; padding: .6rem 1.2rem; background: #30d158; color: #fff; border-radius: 8px; text-decoration: none; }
+  #flags { color: #b25000; }
+  pre { background: #f6f6f8; padding: .75rem; border-radius: 8px; white-space: pre-wrap; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Scribe</h1>
+<p class="sub">Fill a PDF form from your notes and images. AcroForm PDFs only.</p>
 
-      <section id="new" class="view is-active">
-        <form id="runForm" class="run-form">
-          <label>PDF form <input id="pdf" type="file" accept="application/pdf" required /></label>
-          <label>Sources <input id="sources" type="file" multiple required /></label>
-          <button type="submit">Start run</button>
-        </form>
-        <ol id="events" class="events"></ol>
-      </section>
+<div class="drop" id="pdfDrop">Drop a PDF form here, or click to choose</div>
+<input type="file" id="pdfInput" accept="application/pdf" hidden>
+<div class="chips" id="pdfChip"></div>
 
-      <section id="review" class="view">
-        <div id="reviewBody" class="empty">No run selected.</div>
-      </section>
+<div class="drop" id="srcDrop">Drop or paste notes / images here, or click to choose</div>
+<input type="file" id="srcInput" multiple hidden>
+<textarea id="notes" placeholder="…or type notes here"></textarea>
+<div class="chips" id="srcChips"></div>
 
-      <section id="replay" class="view">
-        <label class="file-line">Transcript JSON <input id="replayFile" type="file" accept="application/json" /></label>
-        <div id="replayBody" class="empty">No transcript loaded.</div>
-      </section>
-    </main>
-    <script src="/app.js" type="module"></script>
-  </body>
+<button id="go" disabled>Fill the form</button>
+<div id="status"></div>
+
+<div id="result">
+  <a id="download" download="filled.pdf">Download filled PDF</a>
+  <h3>Summary</h3>
+  <pre id="summary"></pre>
+  <div id="flags"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let pdfFile = null;
+const sources = []; // {name, type, data(base64)}
+
+const b64 = (f) => new Promise((ok, no) => {
+  const r = new FileReader();
+  r.onload = () => ok(r.result.split(",")[1]);
+  r.onerror = no;
+  r.readAsDataURL(f);
+});
+
+function refresh() {
+  $("pdfChip").innerHTML = pdfFile ? `<span class="chip">${pdfFile.name}</span>` : "";
+  $("srcChips").innerHTML = sources.map((s, i) =>
+    `<span class="chip">${s.name}<button data-i="${i}">✕</button></span>`).join("");
+  $("go").disabled = !pdfFile || (sources.length === 0 && !$("notes").value.trim());
+}
+$("srcChips").onclick = (e) => {
+  if (e.target.dataset.i !== undefined) { sources.splice(+e.target.dataset.i, 1); refresh(); }
+};
+$("notes").oninput = refresh;
+
+function wire(drop, input, onFiles) {
+  drop.onclick = () => input.click();
+  input.onchange = () => onFiles([...input.files]);
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); onFiles([...e.dataTransfer.files]); };
+}
+wire($("pdfDrop"), $("pdfInput"), (fs) => { if (fs[0]) { pdfFile = fs[0]; refresh(); } });
+wire($("srcDrop"), $("srcInput"), async (fs) => {
+  for (const f of fs) sources.push({ name: f.name, type: f.type, data: await b64(f) });
+  refresh();
+});
+document.onpaste = async (e) => {
+  for (const item of e.clipboardData.items) {
+    const f = item.getAsFile();
+    if (f) sources.push({ name: f.name || "pasted-image.png", type: f.type, data: await b64(f) });
+  }
+  refresh();
+};
+
+$("go").onclick = async () => {
+  const status = $("status");
+  $("go").disabled = true;
+  $("result").style.display = "none";
+  status.className = "";
+  status.textContent = "Filling the form — this can take a minute…";
+  try {
+    const srcs = [...sources];
+    const notes = $("notes").value.trim();
+    if (notes) srcs.push({ name: "notes.txt", type: "text/plain", data: btoa(unescape(encodeURIComponent(notes))) });
+    const resp = await fetch("/api/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pdf: await b64(pdfFile), sources: srcs }),
+    });
+    const json = await resp.json();
+    if (!resp.ok) throw new Error(json.error || resp.statusText);
+    const bytes = Uint8Array.from(atob(json.filledPdfBase64), (c) => c.charCodeAt(0));
+    $("download").href = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    $("summary").textContent = json.summary || "(no summary)";
+    $("flags").innerHTML = json.uncertainFlags?.length
+      ? "<h3>Needs review</h3><ul>" + json.uncertainFlags.map((f) =>
+          `<li><b>${f.field}</b> [${f.confidence}]: ${f.reason}</li>`).join("") + "</ul>"
+      : "";
+    $("result").style.display = "block";
+    status.textContent = "Done.";
+  } catch (err) {
+    status.className = "err";
+    status.textContent = "Error: " + err.message;
+  } finally {
+    $("go").disabled = false;
+  }
+};
+refresh();
+</script>
+</body>
 </html>

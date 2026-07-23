@@ -1,11 +1,13 @@
 // AcroForm reader/writer. The agent's tools (`list_fields`, `set_field`) call into these.
 // All knowledge of pdf-lib lives in this file — every other file deals in plain JS values.
+import { spawnSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
   PDFCheckBox,
   PDFDocument,
   PDFDropdown,
+  type PDFField,
   PDFOptionList,
   PDFRadioGroup,
   PDFTextField,
@@ -30,34 +32,21 @@ export interface FormHandle {
 }
 
 export async function loadForm(pdfPath: string): Promise<FormHandle> {
-  const bytes = await readFile(pdfPath);
-  const warn = console.warn;
-  console.warn = (...args) => {
-    const msg = String(args[0] ?? "");
-    if (
-      msg.startsWith("Trying to parse invalid object") ||
-      msg.startsWith("Invalid object ref") ||
-      msg.startsWith("Removing XFA form data")
-    ) {
-      return;
-    }
-    warn(...args);
-  };
-  const { pdf, rawFields } = await PDFDocument.load(bytes, {
-    ignoreEncryption: true,
-    throwOnInvalidObject: false,
-  })
-    .then((pdf) => ({ pdf, rawFields: pdf.getForm().getFields() }))
-    .finally(() => {
-      console.warn = warn;
-    });
+  let bytes: Uint8Array = await readFile(pdfPath);
+  let { pdf, rawFields } = await loadPdf(bytes);
+  // An encrypted PDF (e.g. USCIS forms) loads but its field references stay unreadable, so it
+  // masquerades as a field-less form. When qpdf is on PATH, decrypt transparently and retry;
+  // otherwise fail with an explicit message instead of misreporting the file as XFA/flat.
+  if (pdf.isEncrypted) {
+    bytes = decryptWithQpdf(pdfPath);
+    ({ pdf, rawFields } = await loadPdf(bytes));
+  }
   if (rawFields.length === 0) {
     throw new Error(
       "no AcroForm fields - this is probably an XFA or flat form; scribe cannot fill it yet",
     );
   }
   const fields = new Map<string, FieldInfo>();
-
   // Walk every field, normalize to FieldInfo, store both for listing and for later mutation.
   for (const f of rawFields) {
     const name = f.getName();
@@ -101,8 +90,46 @@ export async function loadForm(pdfPath: string): Promise<FormHandle> {
   return { pdf, fields };
 }
 
-export function isNoAcroFormError(err: unknown): boolean {
-  return err instanceof Error && err.message.includes("no AcroForm fields");
+// Load with pdf-lib, muting its noisy recovery warnings so CLI output stays readable.
+async function loadPdf(bytes: Uint8Array): Promise<{ pdf: PDFDocument; rawFields: PDFField[] }> {
+  const warn = console.warn;
+  console.warn = (...args) => {
+    const msg = String(args[0] ?? "");
+    if (
+      msg.startsWith("Trying to parse invalid object") ||
+      msg.startsWith("Invalid object ref") ||
+      msg.startsWith("Removing XFA form data")
+    ) {
+      return;
+    }
+    warn(...args);
+  };
+  return PDFDocument.load(bytes, { ignoreEncryption: true, throwOnInvalidObject: false })
+    .then((pdf) => ({ pdf, rawFields: pdf.getForm().getFields() }))
+    .finally(() => {
+      console.warn = warn;
+    });
+}
+
+// Decrypt an encrypted PDF via qpdf (stdout output, no temp file). USCIS-style forms use an
+// empty user password, so `--decrypt` alone is enough. Throws a clear error if qpdf is missing.
+function decryptWithQpdf(pdfPath: string): Uint8Array {
+  const result = spawnSync("qpdf", ["--decrypt", pdfPath, "-"], {
+    encoding: "buffer",
+    maxBuffer: 256 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0 || result.stdout.length === 0) {
+    const detail = result.error
+      ? String(result.error)
+      : Buffer.from(result.stderr ?? "")
+          .toString("utf8")
+          .trim();
+    throw new Error(
+      `PDF is encrypted - install qpdf (e.g. \`winget install QPDF.QPDF\`) so scribe can decrypt it, or run \`qpdf --decrypt\` yourself first. (${detail})`,
+    );
+  }
+  return new Uint8Array(result.stdout.buffer, result.stdout.byteOffset, result.stdout.byteLength);
 }
 
 // Pure read for the `list_fields` tool — small payload because the model only needs names+types.
@@ -120,13 +147,21 @@ export function setField(h: FormHandle, name: string, value: unknown): string {
   try {
     switch (info.kind) {
       case "text": {
-        if (typeof value !== "string") return `error: field "${name}" expects a string`;
-        if (info.maxLength !== undefined && value.length > info.maxLength) {
-          return `error: value exceeds maxLength=${info.maxLength} for this field (got ${value.length} chars). Check the field constraints and retry with a valid value.`;
+        const text =
+          typeof value === "string"
+            ? value
+            : typeof value === "number" && Number.isFinite(value)
+              ? String(value)
+              : null;
+        if (text === null) {
+          return `error: field "${name}" expects text; send a string such as "37203" or a finite number`;
         }
-        form.getTextField(name).setText(value);
-        info.currentValue = value;
-        return `ok: set ${name} = ${JSON.stringify(value)}`;
+        if (info.maxLength !== undefined && text.length > info.maxLength) {
+          return `error: value exceeds maxLength=${info.maxLength} for this field (got ${text.length} chars). Check the field constraints and retry with a valid value.`;
+        }
+        form.getTextField(name).setText(text);
+        info.currentValue = text;
+        return `ok: set ${name} = ${JSON.stringify(text)}`;
       }
       case "checkbox": {
         const bool = coerceBool(value);

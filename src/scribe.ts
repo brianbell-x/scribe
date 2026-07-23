@@ -10,15 +10,7 @@ import {
   buildUserContent,
   runAgent,
 } from "./agent.ts";
-import { runFlatAgent } from "./flat.ts";
-import {
-  type FieldInfo,
-  type FormHandle,
-  isNoAcroFormError,
-  listFields,
-  loadForm,
-  saveForm,
-} from "./pdf.ts";
+import { type FieldInfo, type FormHandle, listFields, loadForm, saveForm } from "./pdf.ts";
 
 export type { SourceInputs } from "./agent.ts";
 
@@ -28,7 +20,6 @@ export interface ScribeOptions {
   inputs: SourceInputs;
   apiKey: string;
   model?: string;
-  pythonPath?: string;
   complete?: ChatComplete;
   onEvent?: (event: ScribeEvent) => void;
 }
@@ -50,27 +41,10 @@ export async function scribe(opts: ScribeOptions): Promise<ScribeResult> {
   const model = opts.model ?? process.env.SCRIBE_MODEL ?? DEFAULT_MODEL;
 
   // Parse the form first so we can fail fast if it's not an AcroForm.
-  let form: FormHandle;
-  try {
-    form = await loadForm(opts.formPath);
-  } catch (err) {
-    if (!opts.pythonPath || !isNoAcroFormError(err)) throw err;
-    const userContent = await buildUserContent(opts.inputs);
-    const run = await runFlatAgent({
-      apiKey: opts.apiKey,
-      model,
-      userContent,
-      formPath: opts.formPath,
-      outPath: opts.outPath,
-      pythonPath: opts.pythonPath,
-      complete: opts.complete,
-      onToolCall: (record, fields) => opts.onEvent?.({ type: "tool_call", record, fields }),
-    });
-    return writeResult(opts, run);
-  }
+  const form: FormHandle = await loadForm(opts.formPath);
   if (form.fields.size === 0) {
     throw new Error(
-      `No AcroForm fields found in ${opts.formPath}. Scribe currently supports AcroForm PDFs only.`,
+      `No AcroForm fields found in ${opts.formPath}. Scribe supports AcroForm PDFs only.`,
     );
   }
 

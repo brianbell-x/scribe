@@ -16,6 +16,11 @@ export function fixtureComplete() {
                   tc("set_field", { name: "email", value: "jane.doe@example.com" }),
                   tc("set_field", { name: "us_citizen", value: true }),
                   tc("set_field", { name: "purpose", value: "Business" }),
+                  tc("flag_uncertain", {
+                    field: "purpose",
+                    reason: "notes mention both business and family",
+                    confidence: "medium",
+                  }),
                   tc("finish", { summary: "Offline mock filled the fixture form." }),
                 ],
         },
